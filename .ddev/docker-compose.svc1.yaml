@@ -1,0 +1,12 @@
+services:
+  svc1:
+    container_name: ddev-${DDEV_SITENAME}-svc1
+    image: ${BASE_IMAGE:-ubuntu:24.04}-${DDEV_SITENAME}-svc1-built
+    build:
+      context: svc1
+      dockerfile: Dockerfile
+      args:
+        BASE_IMAGE: ${BASE_IMAGE:-ubuntu:24.04}
+    labels:
+      com.ddev.site-name: ${DDEV_SITENAME}
+      com.ddev.approot: $DDEV_APPROOT
