@@ -1,0 +1,15 @@
+services:
+  svc4:
+    container_name: ddev-${DDEV_SITENAME}-svc4
+    image: issue8832-env-arg-local-tag
+    build:
+      dockerfile_inline: |
+        ARG BASE_IMAGE
+        FROM $${BASE_IMAGE}
+        RUN echo "I am svc4 (environment-supplied build arg)" > /marker.txt
+      args:
+        BASE_IMAGE:
+    command: ["sleep", "infinity"]
+    labels:
+      com.ddev.site-name: ${DDEV_SITENAME}
+      com.ddev.approot: $DDEV_APPROOT

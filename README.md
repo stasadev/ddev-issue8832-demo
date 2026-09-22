@@ -7,19 +7,29 @@ against the same default base image, DDEV's documented naming convention
 built images collide on one Docker tag, so the second build silently
 overwrites the first — containers end up running the wrong image.
 
-It defines three services that all build from `ubuntu:24.04` in the three
-ways DDEV supports `build:`, each with a per-service tag qualifier that
-avoids the collision (`-svc1-`, `-svc2-`, `-svc3-`):
+The first three services all build from `ubuntu:24.04` in the three ways DDEV
+supports `build:`, each with a per-service tag qualifier that avoids the
+collision (`-svc1-`, `-svc2-`, `-svc3-`). `svc4` and `svc5` cover Dockerfile
+base-image resolution edge cases:
 
 | Service | Build style | File |
 | --- | --- | --- |
 | `svc1` | separate `Dockerfile` | [.ddev/svc1/Dockerfile](.ddev/svc1/Dockerfile) |
 | `svc2` | separate `Dockerfile` | [.ddev/svc2/Dockerfile](.ddev/svc2/Dockerfile) |
 | `svc3` | `dockerfile_inline` (the pattern from the [custom-compose-files docs](https://ddev.readthedocs.io/en/stable/users/extend/custom-compose-files/)) | [.ddev/docker-compose.svc3.yaml](.ddev/docker-compose.svc3.yaml) |
+| `svc4` | `build.args` value supplied from the project environment | [.ddev/docker-compose.svc4.yaml](.ddev/docker-compose.svc4.yaml) |
+| `svc5` | multi-stage Dockerfile with a later stage named after an earlier base image | [.ddev/svc5/Dockerfile](.ddev/svc5/Dockerfile) |
 
 Each container writes a distinct `/marker.txt` at build time, so you can tell
-at a glance whether each service is really running its own image or has been
-silently overwritten by another service's build.
+whether each service is running its own image or has been overwritten by
+another service's build.
+
+Before running sections 1 through 3, set the build argument required by
+`svc4`:
+
+```bash
+export BASE_IMAGE=ubuntu:24.04
+```
 
 ## 1. Reproduce the tag collision (any DDEV version)
 
@@ -66,11 +76,12 @@ Install DDEV v1.25.4 (or any released version without the #8832 fix), then:
 
 ```bash
 ddev start
-# non-fatal warning: Unable to pull Docker images: ... failed to resolve
-# reference "docker.io/library/ubuntu:24.04-issue8832-demo-svc1": not found
+# non-fatal warning: Unable to pull Docker images: DDEV tries to pull the
+# local image tags for svc1 through svc5, including
+# "docker.io/library/ubuntu:24.04-issue8832-demo-svc1"
 
 ddev debug download-images
-# hard failure, same underlying reference
+# hard failure, with the same local image references
 ```
 
 The project still runs (the warning is non-fatal at `start`), but offline
@@ -86,13 +97,33 @@ instead of parsing it out of the tag), put it first on `PATH`, then:
 ddev start
 # no pull warning
 
-ddev describe -j | jq -r '.raw.services | to_entries[] | select(.key|test("svc")) | "\(.key): \(.value.image)"'
+ddev describe -j | jq -r '.raw.services | to_entries[] | select(.key|test("svc[1-3]")) | "\(.key): \(.value.image)"'
 # svc1: ubuntu:24.04
 # svc2: ubuntu:24.04
 # svc3: ubuntu:24.04
 
 ddev debug download-images
-# ubuntu:24.04 pulled once, for all three services — success
+# ubuntu:24.04 is pulled once for svc1 through svc4, and svc5 pulls
+# alpine:3.20 and busybox:1.36 — success
+```
+
+## 4. Confirm environment-supplied build args and stage-name handling
+
+`svc4` has an arbitrary local image tag and supplies `BASE_IMAGE` without a
+value. Docker Compose resolves it from the project environment at build time.
+`svc5` first uses `alpine:3.20`, then names a later `busybox:1.36` stage
+`alpine`. Only previously declared stage names are internal references.
+
+With the #8832 branch binary first on `PATH`, run:
+
+```bash
+BASE_IMAGE=alpine:3.20 ddev start
+ddev describe -j | jq -r '.raw.services | to_entries[] | select(.key|test("svc[45]")) | "\(.key): \(.value.image)"'
+# svc4: alpine:3.20
+# svc5: alpine:3.20, busybox:1.36
+
+BASE_IMAGE=alpine:3.20 ddev debug download-images
+# alpine:3.20 and busybox:1.36 are pulled successfully
 ```
 
 ## Cleanup
